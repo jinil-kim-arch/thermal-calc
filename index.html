@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>열관류율 계산기 - DB 내장형</title>
+    <style>
+        body { font-family: 'Malgun Gothic', sans-serif; background: #f0f2f5; padding: 20px; font-size: 14px; }
+        .app-container { max-width: 900px; margin: auto; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        h2 { text-align: center; color: #333; margin-bottom: 20px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; background: #fff; }
+        th, td { border: 1px solid #aaa; padding: 10px; text-align: center; }
+        th { background: #f8f9fa; color: #333; }
+        
+        /* 💡 입력창 및 드롭박스 가운데 정렬 완벽 적용 */
+        input, select { 
+            padding: 6px; 
+            border: 1px solid #ccc; 
+            border-radius: 4px; 
+            text-align: center;        /* 기본 가운데 정렬 */
+            text-align-last: center;   /* 드롭박스 선택된 글자 가운데 정렬 (크롬/엣지 필수) */
+        }
+        select option {
+            text-align: center;        /* 펼쳤을 때 나오는 목록 글자들도 가운데 정렬 */
+        }
+        
+        .full-width { width: 95%; }
+        
+        .settings-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; background: #f8f9fa; padding: 15px; border-radius: 8px; border: 1px solid #ddd; }
+        .settings-group { display: flex; gap: 10px; align-items: center; }
+        .settings-group label { font-weight: bold; color: #555; }
+        
+        .btn-group { margin-top: 20px; display: flex; gap: 10px; }
+        .btn { flex: 1; padding: 12px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.2s; }
+        .btn-add { background: #6c757d; color: white; }
+        .btn-calc { background: #007bff; color: white; }
+        .btn-dxf { background: #28a745; color: white; }
+        
+        /* 순서 관리 버튼 디자인 */
+        .action-btn { cursor: pointer; border: none; background: none; font-size: 1.1em; padding: 2px; margin: 0 2px; transition: transform 0.1s; }
+        .action-btn:hover { transform: scale(1.2); }
+        
+        .summary-row { background: #fff9db; font-weight: bold; }
+        .verdict { margin-top: 20px; padding: 15px; text-align: center; font-size: 1.2em; border-radius: 8px; display: none; }
+    </style>
+</head>
+<body>
+
+<div class="app-container">
+    <h2>🏢 열관류율 계산서</h2>
+    
+    <div class="settings-bar">
+        <div class="settings-group">
+            <label>지역:</label>
+            <select id="regionSelect" onchange="updateLegalLimit()" style="width: 100px;">
+                <option value="중부1">중부1</option>
+                <option value="중부2" selected>중부2</option>
+                <option value="남부">남부</option>
+                <option value="제주">제주</option>
+            </select>
+
+            <label style="margin-left: 10px;">부위:</label>
+            <select id="positionSelect" onchange="updateLegalLimit()" style="width: 150px;">
+                <option value="외벽" selected>외벽 (거실)</option>
+                <option value="지붕">지붕 (최상층)</option>
+                <option value="바닥">바닥 (최하층)</option>
+            </select>
+        </div>
+        
+        <div style="font-weight: bold; color: #333;">
+            법적 열관류율 기준: 
+            <input type="number" id="legalLimit" value="0.240" step="0.001" style="width: 80px; color: #d9534f; font-size: 1.1em; font-weight: bold;"> W/㎡K
+        </div>
+    </div>
+
+    <table id="calcTable">
+        <thead>
+            <tr>
+                <th width="40">No.</th>
+                <th>재료명칭</th>
+                <th width="90">두께(mm)</th>
+                <th width="110">열전도율(W/mK)</th>
+                <th width="110">열저항(㎡K/W)</th>
+                <th width="100">관리 (순서/삭제)</th>
+            </tr>
+        </thead>
+        <tbody id="materialBody">
+            <tr>
+                <td>1</td>
+                <td>실외표면저항(직접)</td>
+                <td>-</td>
+                <td>-</td>
+                <td><input type="number" class="r-val full-width" value="0.043" step="0.001"></td>
+                <td>-</td>
+            </tr>
+        </tbody>
+        <tfoot>
+            <tr>
+                <td id="indoorNo">2</td>
+                <td>실내표면저항</td>
+                <td>-</td>
+                <td>-</td>
+                <td><input type="number" class="r-val full-width" value="0.110" step="0.001"></td>
+                <td>-</td>
+            </tr>
+            <tr class="summary-row">
+                <td colspan="4">합 계</td>
+                <td id="totalR">0.153</td>
+                <td>-</td>
+            </tr>
+        </tfoot>
+    </table>
+
+    <div class="btn-group">
+        <button class="btn btn-add" onclick="addRow()">+ 재료 추가</button>
+        <button class="btn btn-calc" onclick="runCalc()">계산 및 판정</button>
+        <button class="btn btn-dxf" onclick="exportDXF()">CAD(.dxf) 다운로드</button>
+    </div>
+    
+    <div id="finalVerdict" class="verdict"></div>
+</div>
+
+<script>
+    const lawStandards = {
+        "중부1": { "외벽": 0.150, "지붕": 0.100, "바닥": 0.150 },
+        "중부2": { "외벽": 0.240, "지붕": 0.150, "바닥": 0.190 },
+        "남부":  { "외벽": 0.320, "지붕": 0.180, "바닥": 0.230 },
+        "제주":  { "외벽": 0.430, "지붕": 0.250, "바닥": 0.330 }
+    };
+
+    function updateLegalLimit() {
+        const region = document.getElementById('regionSelect').value;
+        const position = document.getElementById('positionSelect').value;
+        document.getElementById('legalLimit').value = lawStandards[region][position].toFixed(3);
+        if (document.getElementById('finalVerdict').style.display === 'block') runCalc();
+    }
+
+    const materialDB = {
+        "단열재": [
+            {"name": "PF보드", "lambda": 0.020},
+            {"name": "압출법 보온판 특호", "lambda": 0.0270},
+            {"name": "압출법 보온판 1호", "lambda": 0.0280},
+            {"name": "압출법 보온판 2호", "lambda": 0.0290},
+            {"name": "압출법 보온판 3호", "lambda": 0.0310},
+            {"name": "비드법 보온판 1종 1호", "lambda": 0.0360},
+            {"name": "비드법 보온판 1종 2호", "lambda": 0.0370},
+            {"name": "비드법 보온판 1종 3호", "lambda": 0.0400},
+            {"name": "비드법 보온판 1종 4호", "lambda": 0.0430},
+            {"name": "비드법 보온판 2종 1호", "lambda": 0.0310},
+            {"name": "비드법 보온판 2종 2호", "lambda": 0.0320},
+            {"name": "비드법 보온판 2종 3호", "lambda": 0.0330},
+            {"name": "비드법 보온판 2종 4호", "lambda": 0.0340},
+            {"name": "우레탄보드", "lambda": 0.023},
+            {"name": "글라스울 24K", "lambda": 0.0370},
+            {"name": "글라스울 32K", "lambda": 0.0360},
+            {"name": "글라스울 40K", "lambda": 0.0350},
+            {"name": "글라스울 48K", "lambda": 0.0340},
+            {"name": "에코배트 가등급 R23(THK140)", "lambda": 0.0330},
+            {"name": "에코배트 가등급 R37(THK220)", "lambda": 0.0340},
+            {"name": "에코배트 나등급 R32(THK220)", "lambda": 0.0380},
+            {"name": "에코배트 나등급 R21(THK140)", "lambda": 0.0360},
+            {"name": "에코배트 다등급 R30(THK254)", "lambda": 0.0430},
+            {"name": "에코배트 다등급 R19(THK159)", "lambda": 0.0450},
+            {"name": "에코배트 다등급 R11(THK89)", "lambda": 0.0430},
+            {"name": "열반사단열재 20T_하이론 20T", "lambda": 0.035},
+            {"name": "열반사단열재 30T_태화론 TW-30", "lambda": 0.0135},
+            {"name": "열반사단열재 40T_하이론 TOP4015", "lambda": 0.0144}
+        ],
+        "구조체": [
+            {"name": "철근콘크리트", "lambda": 1.60},
+            {"name": "조적(시멘트벽돌)", "lambda": 1.45},
+            {"name": "조적(시멘트블록)", "lambda": 0.60}
+        ],
+        "마감재": [
+            {"name": "석고보드", "lambda": 0.18},
+            {"name": "시멘트모르타르", "lambda": 1.40},
+            {"name": "타일", "lambda": 1.30},
+            {"name": "PE필름", "lambda": 0.21},
+            {"name": "공기층(밀폐)", "lambda": 0.086}
+        ]
+    };
+
+    function addRow() {
+        const tbody = document.getElementById('materialBody');
+        const row = document.createElement('tr');
+        row.className = "mat-row";
+        
+        let options = '<option value="" style="color:#888;">재료 선택</option>';
+        for(let category in materialDB) {
+            options += `<optgroup label="--- ${category} ---" style="text-align:center; font-weight:bold;">`;
+            materialDB[category].forEach(m => {
+                options += `<option value="${m.lambda}">${m.name}</option>`;
+            });
+            options += `</optgroup>`;
+        }
+
+        row.innerHTML = `
+            <td class="row-no"></td>
+            <td><select class="m-name full-width" onchange="updateLambda(this)">${options}</select></td>
+            <td><input type="number" class="m-t full-width" placeholder="0" oninput="updateRowR(this)"></td>
+            <td><input type="number" class="m-l full-width" step="0.001" oninput="updateRowR(this)"></td>
+            <td class="m-r">0.000</td>
+            <td>
+                <button class="action-btn" onclick="moveUp(this)" title="위로 이동">🔼</button>
+                <button class="action-btn" onclick="moveDown(this)" title="아래로 이동">🔽</button>
+                <button class="action-btn" onclick="this.closest('tr').remove(); reNumber();" title="삭제">❌</button>
+            </td>
+        `;
+        tbody.appendChild(row);
+        reNumber();
+    }
+
+    function moveUp(btn) {
+        const row = btn.closest('tr');
+        const prevRow = row.previousElementSibling;
+        if (prevRow && prevRow.classList.contains('mat-row')) {
+            row.parentNode.insertBefore(row, prevRow);
+            reNumber();
+        }
+    }
+
+    function moveDown(btn) {
+        const row = btn.closest('tr');
+        const nextRow = row.nextElementSibling;
+        if (nextRow && nextRow.classList.contains('mat-row')) {
+            row.parentNode.insertBefore(nextRow, row);
+            reNumber();
+        }
+    }
+
+    function updateLambda(sel) {
+        const row = sel.parentElement.parentElement;
+        row.querySelector('.m-l').value = sel.value;
+        updateRowR(row.querySelector('.m-t'));
+    }
+
+    function updateRowR(input) {
+        const row = input.parentElement.parentElement;
+        const t = parseFloat(row.querySelector('.m-t').value || 0) / 1000;
+        const l = parseFloat(row.querySelector('.m-l').value || 0);
+        const rCell = row.querySelector('.m-r');
+        if (t > 0 && l > 0) {
+            rCell.innerText = (t / l).toFixed(3);
+        } else {
+            rCell.innerText = "0.000";
+        }
+    }
+
+    function reNumber() {
+        const rows = document.getElementById('materialBody').rows;
+        for(let i=0; i<rows.length; i++) {
+            rows[i].cells[0].innerText = i + 1;
+        }
+        document.getElementById('indoorNo').innerText = rows.length + 1;
+    }
+
+    function runCalc() {
+        let sumR = 0;
+        document.querySelectorAll('.r-val').forEach(el => sumR += parseFloat(el.value || 0));
+        document.querySelectorAll('.m-r').forEach(el => sumR += parseFloat(el.innerText || 0));
+        
+        const totalR = sumR.toFixed(3);
+        const uVal = (1 / sumR).toFixed(3);
+        const limit = parseFloat(document.getElementById('legalLimit').value);
+
+        document.getElementById('totalR').innerText = totalR;
+        const v = document.getElementById('finalVerdict');
+        v.style.display = 'block';
+        
+        const isPass = parseFloat(uVal) <= limit;
+        v.innerHTML = `최종 열관류율: <b>${uVal}</b> W/㎡K <br> [ ${isPass ? '<span style="color:green">✅ 적합 (PASS)</span>' : '<span style="color:red">❌ 부적합 (FAIL)</span>'} ]`;
+        v.style.background = isPass ? '#e6fffa' : '#fff5f5';
+        v.style.border = isPass ? '1px solid #38b2ac' : '1px solid #f56565';
+        
+        return { uVal, limit, isPass };
+    }
+
+    function exportDXF() {
+        const { uVal, limit, isPass } = runCalc();
+        const region = document.getElementById('regionSelect').options[document.getElementById('regionSelect').selectedIndex].text;
+        const position = document.getElementById('positionSelect').options[document.getElementById('positionSelect').selectedIndex].text;
+        
+        // 1. 호환성을 위해 캐드 파일의 '버전 정보(Header)'를 명시적으로 추가합니다.
+        let dxf = `0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1009\n0\nENDSEC\n`;
+        
+        // 2. 도면 요소(Entities) 시작
+        dxf += `0\nSECTION\n2\nENTITIES\n`;
+        
+        dxf += drawText(10, 60, `■ 열관류율 계산 검토서 (${region} / ${position})`);
+        dxf += drawText(10, 50, `1. 계산 열관류율: ${uVal} W/m2K`);
+        dxf += drawText(10, 40, `2. 법적 기준치: ${limit} W/m2K`);
+        dxf += drawText(10, 30, `3. 최종 판정: ${isPass ? 'PASS' : 'FAIL'}`);
+        
+        dxf += drawLine(0, 0, 150, 0);
+        dxf += drawLine(0, 70, 150, 70);
+        
+        // 3. 파일의 끝을 정확히 알리는 줄바꿈 추가
+        dxf += `0\nENDSEC\n0\nEOF\n`;
+        
+        const blob = new Blob([dxf], {type: 'application/dxf'});
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = '열관류율_계산결과.dxf';
+        a.click();
+    }
+
+    // 💡 레이어 '0'을 뜻하는 코드(8\n0\n)를 모든 선과 글자에 강제로 추가했습니다.
+    function drawText(x, y, txt) { 
+        return `0\nTEXT\n8\n0\n10\n${x}\n20\n${y}\n40\n4\n1\n${txt}\n`; 
+    }
+    function drawLine(x1, y1, x2, y2) { 
+        return `0\nLINE\n8\n0\n10\n${x1}\n20\n${y1}\n11\n${x2}\n21\n${y2}\n`; 
+    }
+
+    updateLegalLimit();
+    reNumber();
+</script>
+</body>
+</html>

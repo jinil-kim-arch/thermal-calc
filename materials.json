@@ -1,0 +1,14 @@
+{
+  "insulation": [
+    {"name": "PF보드", "lambda": 0.020},
+    {"name": "압출법보온판", "lambda": 0.027}
+  ],
+  "structure": [
+    {"name": "콘크리트", "lambda": 1.6},
+    {"name": "벽돌", "lambda": 0.9}
+  ],
+  "finish": [
+    {"name": "석고보드", "lambda": 0.18},
+    {"name": "모르타르", "lambda": 1.4}
+  ]
+}
